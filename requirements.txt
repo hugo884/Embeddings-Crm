@@ -1,0 +1,7 @@
+fastapi[all]
+uvicorn
+sentence-transformers
+cachetools
+numpy
+python-multipart
+python-dotenv
