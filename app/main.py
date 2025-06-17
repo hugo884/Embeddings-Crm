@@ -1,14 +1,8 @@
-import sys
-from pathlib import Path
-
-# Añadir directorio padre al path para resolver imports
-sys.path.append(str(Path(__file__).parent.parent))
-
 from fastapi import FastAPI, HTTPException, Security, Request
 from fastapi.security import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
-from app.model_loader import EmbeddingModel
-from app.cache_utils import EmbeddingCache
+from .model_loader import EmbeddingModel
+from .cache_utils import EmbeddingCache
 import numpy as np
 import os
 import psutil
