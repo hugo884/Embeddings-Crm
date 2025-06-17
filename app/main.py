@@ -1,8 +1,14 @@
+import sys
+from pathlib import Path
+
+# Añadir directorio padre al path para resolver imports
+sys.path.append(str(Path(__file__).parent.parent))
+
 from fastapi import FastAPI, HTTPException, Security, Request
 from fastapi.security import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
-from .model_loader import EmbeddingModel
-from .cache_utils import EmbeddingCache
+from app.model_loader import EmbeddingModel
+from app.cache_utils import EmbeddingCache
 import numpy as np
 import os
 import psutil
@@ -32,8 +38,9 @@ app.add_middleware(
 
 # Configuración seguridad
 API_KEYS = os.getenv("API_KEYS", "").split(",")
-model = None  # Se inicializará después de determinar los recursos
+model = None
 cache = None
+executor = None
 api_key_header = APIKeyHeader(name="X-API-KEY")
 
 def validate_api_key(api_key: str = Security(api_key_header)):
@@ -43,7 +50,6 @@ def validate_api_key(api_key: str = Security(api_key_header)):
 
 @app.on_event("startup")
 async def initialize_service():
-    """Inicializa el servicio optimizando para los recursos disponibles"""
     global model, cache, executor
     
     # Obtener recursos del sistema
@@ -52,14 +58,13 @@ async def initialize_service():
     
     logger.info(f"🚀 Recursos detectados: RAM={total_ram/1024**3:.2f}GB, CPUs={cpu_count}")
     
-    # Calcular parámetros óptimos basados en recursos
+    # Calcular parámetros óptimos
     max_workers = max(2, min(cpu_count, 8))
-    cache_size = min(20000, math.floor(total_ram / (768 * 4 * 1.5)))  # ~1.5KB por embedding
+    cache_size = min(20000, math.floor(total_ram / (768 * 4 * 1.5)))
     
-    # Optimizaciones de PyTorch basadas en recursos
     torch_config = {
         "num_threads": max(1, min(cpu_count // 2, 4)),
-        "quantize": total_ram < 12 * 1024**3  # Cuantizar si menos de 12GB RAM
+        "quantize": total_ram < 12 * 1024**3
     }
     
     logger.info(f"⚙️ Configuración óptima: Workers={max_workers}, Cache={cache_size}, Threads={torch_config['num_threads']}")
@@ -71,7 +76,6 @@ async def initialize_service():
     model = EmbeddingModel(torch_config)
     cache = EmbeddingCache(max_size=cache_size, ttl=7200)
     executor = ThreadPoolExecutor(max_workers=max_workers)
-    
 
 @app.post("/v1/embed")
 async def generate_embedding(request: Request, texts: list[str], api_key: str = Security(validate_api_key)):
