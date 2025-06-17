@@ -1,27 +1,28 @@
-FROM python:3.10-slim
+FROM python:3.10-slim-bullseye
 
-# Crear usuario no-root para mayor seguridad
-RUN useradd --create-home appuser
-WORKDIR /home/appuser/app
-RUN chown appuser:appuser /home/appuser/app
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+    libgomp1 \
+    libopenblas-dev \
+    ocl-icd-opencl-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Cambiar a usuario no-root
-USER appuser
+WORKDIR /app
 
-# Crear entorno virtual
-RUN python -m venv /home/appuser/venv
-ENV PATH="/home/appuser/venv/bin:$PATH"
+ENV OMP_NUM_THREADS=1
+ENV TOKENIZERS_PARALLELISM=true
+ENV TF_CPP_MIN_LOG_LEVEL=3
+ENV PIP_NO_CACHE_DIR=1
 
-# Actualizar pip y configurar entorno
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+# Actualizar pip primero para evitar problemas de compatibilidad
+RUN pip install --no-cache-dir --upgrade pip
 
-# Copiar e instalar dependencias
-COPY --chown=appuser:appuser requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir torch==2.2.1 --index-url https://download.pytorch.org/whl/cpu
 
-# Copiar aplicación
-COPY --chown=appuser:appuser . .
+COPY . .
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+CMD ["gunicorn", "app.main:app", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "120"]

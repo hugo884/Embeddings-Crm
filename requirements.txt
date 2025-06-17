@@ -1,7 +1,13 @@
-fastapi[all]
-uvicorn
-sentence-transformers
-cachetools
-numpy
+fastapi==0.110.0
+uvicorn==0.29.0
+gunicorn==21.2.0
+sentence-transformers==2.7.0
+numpy==1.26.4
+torch==2.2.1
+cachetools==5.3.3
+psutil==5.9.8
+python-dotenv==1.0.1
+optimum[onnxruntime]==1.18.1
 python-multipart
-python-dotenv
+hf_xet
+huggingface-hub==0.22.2  # Versión más reciente para resolver la advertencia
