@@ -29,42 +29,39 @@ RUN pip install --no-cache-dir -r requirements.txt \
 # ------------------------------------------------------------
 FROM python:3.10-slim-bullseye
 
-# 5. Librerías de sistema y utilidades (igual)
+# 5. Librerías de sistema y utilidades
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     libopenblas-base \
     dos2unix \
     && rm -rf /var/lib/apt/lists/*
 
-# 6. Variables de entorno (igual)
+# 6. Variables de entorno
 ENV OMP_NUM_THREADS=1 \
     TOKENIZERS_PARALLELISM=false \
     TF_CPP_MIN_LOG_LEVEL=3 \
     PYTHONPATH=/app \
     PATH="/app/venv/bin:$PATH"
 
-# 7. Crear usuario no-root (igual)
+# 7. Crear usuario no-root
 RUN groupadd -r appuser && \
     useradd -r -g appuser -d /app -s /bin/bash appuser
 
-# 8. Copiar entorno virtual (igual)
+# 8. Copiar entorno virtual
 COPY --from=builder --chown=appuser:appuser /app/venv /app/venv
 
-# 9. Copiar aplicación (igual)
+# 9. Copiar aplicación
 WORKDIR /app
 COPY --chown=appuser:appuser . .
 
-# 10. Convertir formato y ajustar permisos CORREGIDO:
+# 10. Convertir formato y ajustar permisos CORREGIDO (chmod en minúscula)
 RUN dos2unix entrypoint.sh && \
-    # Aplicar permisos globales:
     chmod 755 /app && \
     find . -path ./venv -prune -o -type d -exec chmod 755 {} + && \
     find . -path ./venv -prune -o -type f -exec chmod 644 {} + && \
-    # Dar permiso de ejecución SOLO al entrypoint:
-    chmod +x entrypoint.sh
+    chmod +x entrypoint.sh  # ¡Aquí corregido!
 
-
-# 12. Verificación básica (solo ls)
+# 12. Verificación básica
 RUN ls -l entrypoint.sh
 
 # 13. Configurar usuario y puerto
