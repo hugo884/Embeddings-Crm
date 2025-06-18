@@ -73,6 +73,7 @@ def get_status():
         "cache_initialized": cache is not None,
         "executor_initialized": executor is not None,
         "max_workers": executor._max_workers if executor else 0,
-        # Nuevo campo: tamaño de la caché si está inicializada
-        "cache_size": cache.cache.maxsize if cache is not None else 0
+        # USAR LAS NUEVAS FUNCIONES DE LA CACHÉ
+        "cache_size": cache.get_size() if cache else 0,
+        "cache_usage": cache.get_usage() if cache else 0
     }
