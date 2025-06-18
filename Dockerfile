@@ -69,4 +69,4 @@ USER appuser
 EXPOSE 8000
 
 # 13. Ejecutar script de entrada
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["./entrypoint.sh"]
