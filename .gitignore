@@ -1,0 +1,48 @@
+# Entornos virtuales
+env/
+venv/
+.venv/
+
+# Archivos de entorno
+.env
+*.env
+.env.local
+
+# Cache de Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+app/__pycache__/
+app/*/__pycache__/
+
+# VS Code
+.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Modelos y cachés
+model_cache/
+*.bin
+*.pkl
+*.h5
+*.pt
+*.pth
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Archivos temporales
+*.tmp
+*.temp
+
+# Docker (opcional, solo si usas Docker Compose)
+docker-compose.override.yml
