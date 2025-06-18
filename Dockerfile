@@ -64,8 +64,8 @@ RUN chmod 755 /app && \
     find . -path ./venv -prune -o -type d -exec chmod 755 {} + && \
     find . -path ./venv -prune -o -type f -exec chmod 644 {} +
 
-# 12. Verificación extra (opcional)
-RUN ls -l entrypoint.sh && file entrypoint.sh
+# 12. Verificación básica (solo ls)
+RUN ls -l entrypoint.sh
 
 # 13. Configurar usuario y puerto
 USER appuser
