@@ -20,7 +20,7 @@ RUN python -m venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # 4. Instalación de dependencias
-COPY requirements.txt .
+COPY requirements.txt . 
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir torch==2.2.1 --index-url https://download.pytorch.org/whl/cpu
 
@@ -62,8 +62,16 @@ RUN chmod 755 /app && \
 # 11. Verificar permisos de gunicorn (solo para diagnóstico, puede remover en producción)
 RUN ls -l /app/venv/bin/gunicorn
 
+# 12. Determinar el número de trabajadores dinámicamente según los recursos disponibles
+# Establece el número de trabajadores (workers) basado en el número de núcleos de CPU
+ENV WORKERS_COUNT=2
+RUN if [ -z "$WORKERS_COUNT" ]; then \
+        WORKERS_COUNT=$(nproc --all); \
+    fi
+
 USER appuser
 EXPOSE 8000
 
+# 13. Comando para arrancar el servidor con Gunicorn y Uvicorn
 CMD ["gunicorn", "app.main:app", "--worker-class", "uvicorn.workers.UvicornWorker", \
-     "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "120", "--preload"]
+    "--bind", "0.0.0.0:8000", "--workers", "$WORKERS_COUNT", "--timeout", "120", "--preload"]
