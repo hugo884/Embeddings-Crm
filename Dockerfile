@@ -9,13 +9,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV PIP_NO_CACHE_DIR=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUSERBASE=/app/.local
+    VIRTUAL_ENV=/app/venv
 
 WORKDIR /app
 
+# Crear entorno virtual
+RUN python -m venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
 COPY requirements.txt .
-RUN pip install --user --no-warn-script-location --no-cache-dir -r requirements.txt \
-    && pip install --user --no-warn-script-location --no-cache-dir torch==2.2.1 --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir torch==2.2.1 --index-url https://download.pytorch.org/whl/cpu
 
 # Fase final
 FROM python:3.10-slim-bullseye
@@ -25,19 +29,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libopenblas-base \
     && rm -rf /var/lib/apt/lists/*
 
-# Configura variables críticas
+# Configura entorno virtual
 ENV OMP_NUM_THREADS=1 \
     TOKENIZERS_PARALLELISM=true \
     TF_CPP_MIN_LOG_LEVEL=3 \
-    PATH=/app/.local/bin:$PATH \
-    PYTHONUSERBASE=/app/.local \
+    VIRTUAL_ENV=/app/venv \
+    PATH="/app/venv/bin:$PATH" \
     PYTHONPATH=/app
 
 # Crea usuario no-root
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
-# Copia las dependencias instaladas (con permisos correctos)
-COPY --chown=appuser:appuser --from=builder /app/.local /app/.local
+# Copia entorno virtual
+COPY --chown=appuser:appuser --from=builder /app/venv /app/venv
 
 # Copia la aplicación
 WORKDIR /app
