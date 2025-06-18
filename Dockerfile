@@ -8,7 +8,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ENV PIP_NO_CACHE_DIR=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUSERBASE=/app/.local
 
 WORKDIR /app
 
@@ -19,26 +20,30 @@ RUN pip install --user --no-warn-script-location --no-cache-dir -r requirements.
 # Fase final
 FROM python:3.10-slim-bullseye
 
-COPY --from=builder /root/.local /root/.local
-COPY --from=builder /app /app
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     libopenblas-base \
     && rm -rf /var/lib/apt/lists/*
 
-# CORRECCIÓN CLAVE: Establecer PYTHONPATH correctamente
+# Configura variables críticas
 ENV OMP_NUM_THREADS=1 \
     TOKENIZERS_PARALLELISM=true \
     TF_CPP_MIN_LOG_LEVEL=3 \
-    PATH=/root/.local/bin:$PATH \
+    PATH=/app/.local/bin:$PATH \
+    PYTHONUSERBASE=/app/.local \
     PYTHONPATH=/app
 
+# Crea usuario no-root
 RUN groupadd -r appuser && useradd -r -g appuser appuser
-USER appuser
 
+# Copia las dependencias instaladas (con permisos correctos)
+COPY --chown=appuser:appuser --from=builder /app/.local /app/.local
+
+# Copia la aplicación
+WORKDIR /app
 COPY --chown=appuser:appuser . .
 
+USER appuser
 EXPOSE 8000
 
-CMD ["gunicorn", "app.main:app", "--worker-class", "uvicorn.workers.UvicornWorker",  "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "120", "--preload"]
+CMD ["gunicorn", "app.main:app", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "120", "--preload"]
