@@ -1,13 +1,13 @@
 # Fase de construcción - SOLO se ejecuta cuando cambian dependencias
 FROM python:3.10-slim-bullseye as builder
 
-# 1. Instalación de librerías del sistema (capa en caché hasta que cambien los paquetes)
+# 1. Instalación de librerías del sistema
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     libopenblas-base \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Variables de entorno para optimización
+# 2. Variables de entorno
 ENV PIP_NO_CACHE_DIR=off \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -15,48 +15,52 @@ ENV PIP_NO_CACHE_DIR=off \
 
 WORKDIR /app
 
-# 3. Crear entorno virtual (capa estable)
+# 3. Crear entorno virtual
 RUN python -m venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
-# 4. Instalación de dependencias (capa en caché mientras requirements.txt no cambie)
+# 4. Instalación de dependencias
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir torch==2.2.1 --index-url https://download.pytorch.org/whl/cpu
 
 # ------------------------------------------------------------
-# Fase final - Se reconstruye SOLO cuando cambia el código
+# Fase final
 # ------------------------------------------------------------
 FROM python:3.10-slim-bullseye
 
-# 5. Librerías de sistema necesarias para ejecución
+# 5. Librerías de sistema
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     libopenblas-base \
     && rm -rf /var/lib/apt/lists/*
 
-# 6. Variables críticas de entorno
+# 6. Variables de entorno
 ENV OMP_NUM_THREADS=1 \
     TOKENIZERS_PARALLELISM=false \
     TF_CPP_MIN_LOG_LEVEL=3 \
     PYTHONPATH=/app \
     PATH="/app/venv/bin:$PATH"
 
-# 7. Crear usuario no-root con home directory
+# 7. Crear usuario no-root
 RUN groupadd -r appuser && \
     useradd -r -g appuser -d /app -s /sbin/nologin appuser
 
-# 8. Copiar entorno virtual (capa estable)
-COPY --from=builder /app/venv /app/venv
+# 8. Copiar entorno virtual
+COPY --from=builder --chown=appuser:appuser /app/venv /app/venv
 
-# 9. Copiar aplicación como último paso (capa que cambia frecuentemente)
+# 9. Copiar aplicación
 WORKDIR /app
 COPY --chown=appuser:appuser . .
 
-# 10. Permisos adicionales para seguridad
+# 10. CORRECCIÓN CLAVE: Aplicar permisos solo al código de la aplicación
+#     (excluyendo el entorno virtual)
 RUN chmod 755 /app && \
-    find /app -type d -exec chmod 755 {} + && \
-    find /app -type f -exec chmod 644 {} +
+    find . -path ./venv -prune -o -type d -exec chmod 755 {} + && \
+    find . -path ./venv -prune -o -type f -exec chmod 644 {} +
+
+# 11. Verificar permisos de gunicorn (solo para diagnóstico, puede remover en producción)
+RUN ls -l /app/venv/bin/gunicorn
 
 USER appuser
 EXPOSE 8000
