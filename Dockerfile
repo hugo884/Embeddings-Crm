@@ -55,18 +55,21 @@ WORKDIR /app
 COPY --chown=appuser:appuser . .
 
 # 10. Convertir formato y dar permisos a entrypoint
-RUN dos2unix /app/entrypoint.sh && \
-    chmod +x /app/entrypoint.sh && \
-    chown appuser:appuser /app/entrypoint.sh
+RUN dos2unix entrypoint.sh && \
+    chmod +x entrypoint.sh && \
+    chown appuser:appuser entrypoint.sh
 
 # 11. Aplicar permisos generales
 RUN chmod 755 /app && \
     find . -path ./venv -prune -o -type d -exec chmod 755 {} + && \
     find . -path ./venv -prune -o -type f -exec chmod 644 {} +
 
-# 12. Configurar usuario y puerto
+# 12. Verificación extra (opcional)
+RUN ls -l entrypoint.sh && file entrypoint.sh
+
+# 13. Configurar usuario y puerto
 USER appuser
 EXPOSE 8000
 
-# 13. Ejecutar script de entrada
-ENTRYPOINT ["./entrypoint.sh"]
+# 14. Ejecutar script de entrada
+ENTRYPOINT ["/app/entrypoint.sh"]
