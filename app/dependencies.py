@@ -119,16 +119,23 @@ def get_executor():
 def get_status() -> dict:
     """Devuelve el estado actual del servicio"""
     try:
-        cache = get_cache()
-        model = get_model()
-        executor = get_executor()
+        # Si no hay instancia de modelo, no está inicializado
+        if not app_state.model:
+            return {
+                "model_initialized": False,
+                "max_workers": 0,
+                "cache_size": 0,
+                "cache_usage": 0,
+                "cache_hits": 0,
+                "cache_misses": 0,
+            }
         
         # Obtener estadísticas de la caché
-        cache_stats = cache.get_stats() if cache else {}
+        cache_stats = app_state.cache.get_stats() if app_state.cache else {}
         
         return {
-            "model_initialized": model is not None and hasattr(model, 'is_loaded') and model.is_loaded(),
-            "max_workers": executor._max_workers if executor else 0,
+            "model_initialized": app_state.model.is_loaded() if hasattr(app_state.model, 'is_loaded') else True,
+            "max_workers": app_state.executor._max_workers if app_state.executor else 0,
             "cache_size": cache_stats.get("max_size", 0),
             "cache_usage": cache_stats.get("current_size", 0),
             "cache_hits": cache_stats.get("hits", 0),

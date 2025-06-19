@@ -46,16 +46,22 @@ async def embed_endpoint(
         logger.error(f"Error en endpoint /embed: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error procesando embeddings: {str(e)}")
 
+
 @router.get("/health", tags=["System"])
 def health_check():
     try:
         status = get_status()
-        service = get_embedding_service()
-
+        
         # Si el modelo no está inicializado
         if not status["model_initialized"]:
-            return {"status": "INITIALIZING"}
+            return {
+                "status": "INITIALIZING",
+                "message": "Model is still loading"
+            }
 
+        # Obtener servicio solo si está inicializado
+        service = get_embedding_service()
+        
         # Obtener métricas del sistema
         mem = psutil.virtual_memory()
         
@@ -66,9 +72,10 @@ def health_check():
             hit_rate = (status["cache_hits"] / total_requests) * 100
             cache_hit_rate = f"{hit_rate:.1f}%"
 
+        # Usar service.model.model_name en lugar de service.model.config
         return {
             "status": "OK",
-            "model": os.getenv("EMBEDDING_MODEL", "unknown"),
+            "model": service.model.model_name,  # Cambiado aquí
             "model_dimensions": service.dims,
             "torch_threads": torch.get_num_threads(),
             "max_workers": status["max_workers"],

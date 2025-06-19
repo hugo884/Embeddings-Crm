@@ -10,7 +10,8 @@ logger = logging.getLogger(__name__)
 
 class EmbeddingModel:
     def __init__(self, torch_config=None):
-        model_name = os.getenv("EMBEDDING_MODEL", "paraphrase-multilingual-mpnet-base-v2")
+        self.model_name = os.getenv("EMBEDDING_MODEL", "paraphrase-multilingual-mpnet-base-v2")
+        self.loaded = False  # Bandera para indicar si el modelo está cargado
         
         # Determinar dispositivo automáticamente
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -18,28 +19,33 @@ class EmbeddingModel:
         # Manejo de precisión más robusto
         self.precision = self._determine_precision(torch_config)
         
-        logger.info(f"⏳ Loading model '{model_name}' on {self.device} ({self.precision})...")
+        logger.info(f"⏳ Loading model '{self.model_name}' on {self.device} ({self.precision})...")
         
-        # Parámetros de carga optimizados
-        load_params = {
-            "device": self.device,
-            "cache_folder": "./model_cache"
-        }
-        
-        # Configuración de precisión para GPU
-        if self.precision == "fp16" and self.device == "cuda":
-            load_params["torch_dtype"] = torch.float16
-        
-        # Cargar modelo principal
-        self.model = SentenceTransformer(model_name, **load_params)
-        self.model_dimensions = self.model.get_sentence_embedding_dimension()
-        
-        # Manejo de cuantización más seguro
-        self.quantized_model = None
-        if self.precision == "quantized":
-            self._initialize_quantized_model(model_name)
-        
-        logger.info(f"✅ Model loaded | Dimensions: {self.model_dimensions}")
+        try:
+            # Parámetros de carga optimizados
+            load_params = {
+                "device": self.device,
+                "cache_folder": "./model_cache"
+            }
+            
+            # Configuración de precisión para GPU
+            if self.precision == "fp16" and self.device == "cuda":
+                load_params["torch_dtype"] = torch.float16
+            
+            # Cargar modelo principal
+            self.model = SentenceTransformer(self.model_name, **load_params)
+            self.model_dimensions = self.model.get_sentence_embedding_dimension()
+            
+            # Manejo de cuantización más seguro
+            self.quantized_model = None
+            if self.precision == "quantized":
+                self._initialize_quantized_model()
+            
+            self.loaded = True  # Marcar como cargado exitosamente
+            logger.info(f"✅ Model loaded | Dimensions: {self.model_dimensions}")
+        except Exception as e:
+            logger.critical(f"❌ Error loading model: {str(e)}", exc_info=True)
+            raise RuntimeError(f"Model loading failed: {str(e)}")
 
     def _determine_precision(self, torch_config):
         """Determina la precisión óptima basada en configuración y hardware"""
@@ -51,12 +57,15 @@ class EmbeddingModel:
         
         return "fp32"
 
-    def _initialize_quantized_model(self, model_name):
+    def _initialize_quantized_model(self):
         """Inicializa modelo cuantizado solo si es necesario y posible"""
         try:
             logger.info("🔄 Applying model quantization...")
             from optimum.onnxruntime import ORTModelForFeatureExtraction
-            self.quantized_model = ORTModelForFeatureExtraction.from_pretrained(model_name, export=True)
+            self.quantized_model = ORTModelForFeatureExtraction.from_pretrained(
+                self.model_name, 
+                export=True
+            )
             logger.info("✅ Quantization applied successfully")
         except ImportError:
             logger.warning("⚠️ ONNX Runtime not installed, using standard model")
@@ -82,6 +91,9 @@ class EmbeddingModel:
 
     def encode(self, texts: List[str], **kwargs) -> np.ndarray:
         """Codifica textos con manejo automático de recursos"""
+        if not self.loaded:
+            raise RuntimeError("Model not loaded")
+        
         # Calcular batch_size óptimo si no se especifica
         if "batch_size" not in kwargs:
             kwargs["batch_size"] = self._calculate_optimal_batch_size(texts)
@@ -103,3 +115,7 @@ class EmbeddingModel:
     def get_dimensions(self) -> int:
         """Devuelve las dimensiones del embedding"""
         return self.model_dimensions
+    
+    def is_loaded(self) -> bool:
+        """Indica si el modelo está cargado y listo para usar"""
+        return self.loaded
