@@ -1,5 +1,5 @@
 # Fase de construcción
-FROM python:3.10-slim-bullseye as builder
+FROM python:3.10-slim-bullseye AS builder
 
 # 1. Instalación de librerías del sistema
 RUN apt-get update && apt-get install -y --no-install-recommends \
