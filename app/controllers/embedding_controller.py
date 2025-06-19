@@ -1,60 +1,94 @@
-from fastapi import APIRouter, Security, Depends
+from fastapi import APIRouter, Security, Depends, HTTPException
 import psutil
 import torch
 import os
-from ..schemas import EmbedRequest, EmbedResponse
-from ..services.embedding_service import EmbeddingService
+import logging
+from ..schemas import EmbedItemRequest, EmbedItemResponse, EmbedRequest, EmbedResponse
 from ..dependencies import get_embedding_service, get_status, validate_api_key
 
-router = APIRouter(tags=["Embedding"])
+logger = logging.getLogger(__name__)
 
-@router.post("/v1/embed", response_model=EmbedResponse)
+router = APIRouter()
+
+@router.post("/v1/embed", response_model=EmbedResponse, tags=["Embedding"])
 async def embed_endpoint(
     body: EmbedRequest,
     api_key: str = Security(validate_api_key),
-    service: EmbeddingService = Depends(get_embedding_service)
+    service = Depends(get_embedding_service)
 ):
-    embeddings, cached, total_time, batch_size = await service.embed_texts(body.texts)
-    return {
-        "embeddings": embeddings,
-        "cached": cached,
-        "processing_time": total_time,
-        "batch_size": batch_size
-    }
+    try:
+        # Validar entrada
+        if not body.items or len(body.items) == 0:
+            raise HTTPException(status_code=400, detail="Lista de items vacía")
+        
+        # Extraer textos manteniendo relación con IDs
+        texts = [item.text for item in body.items]
+        
+        # Generar embeddings
+        embeddings, cached, total_time, processed = await service.embed_texts(texts)
+        
+        # Construir respuesta
+        response_items = [
+            EmbedItemResponse(
+                productId=body.items[i].productId,
+                embedding=emb
+            )
+            for i, emb in enumerate(embeddings)
+        ]
+        
+        return EmbedResponse(
+            items=response_items,
+            cached=cached,
+            processing_time=total_time,
+            batch_size=processed
+        )
+    except Exception as e:
+        logger.error(f"Error en endpoint /embed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error procesando embeddings: {str(e)}")
 
-@router.get("/health")
+@router.get("/health", tags=["System"])
 def health_check():
-    status = get_status()
+    try:
+        status = get_status()
+        service = get_embedding_service()
 
-    if not status["model_initialized"]:
-        return {"status": "INITIALIZING"}
+        # Si el modelo no está inicializado
+        if not status["model_initialized"]:
+            return {"status": "INITIALIZING"}
 
-    mem = psutil.virtual_memory()
-    service = get_embedding_service()
-
-    # CORREGIR CÁLCULO DE CACHE_HIT_RATE
-    cache_hit_rate = "N/A"
-    if status['cache_size'] > 0:
-        try:
-            hit_rate = (status['cache_usage'] / status['cache_size']) * 100
+        # Obtener métricas del sistema
+        mem = psutil.virtual_memory()
+        
+        # Calcular tasa de aciertos de caché
+        cache_hit_rate = "0.0%"
+        total_requests = status["cache_hits"] + status["cache_misses"]
+        if total_requests > 0:
+            hit_rate = (status["cache_hits"] / total_requests) * 100
             cache_hit_rate = f"{hit_rate:.1f}%"
-        except ZeroDivisionError:
-            cache_hit_rate = "0.0%"
 
-    return {
-        "status": "OK",
-        "model": os.getenv("EMBEDDING_MODEL", "unknown"),
-        "model_dimensions": service.model.get_dimensions(),
-        "torch_threads": torch.get_num_threads(),
-        "max_workers": status["max_workers"],
-        "cache_size": status["cache_size"],
-        "cache_usage": status["cache_usage"],
-        "cache_hit_rate": cache_hit_rate,
-        "system_ram": f"{mem.used/1024**3:.1f}/{mem.total/1024**3:.1f} GB",
-        "cpu_usage": f"{psutil.cpu_percent()}%"
-    }
+        return {
+            "status": "OK",
+            "model": os.getenv("EMBEDDING_MODEL", "unknown"),
+            "model_dimensions": service.dims,
+            "torch_threads": torch.get_num_threads(),
+            "max_workers": status["max_workers"],
+            "cache": {
+                "max_size": status["cache_size"],
+                "current_size": status["cache_usage"],
+                "hits": status["cache_hits"],
+                "misses": status["cache_misses"],
+                "hit_rate": cache_hit_rate
+            },
+            "system_ram": f"{mem.used/1024**3:.1f}/{mem.total/1024**3:.1f} GB",
+            "cpu_usage": f"{psutil.cpu_percent()}%"
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}", exc_info=True)
+        return {
+            "status": "ERROR",
+            "message": str(e)
+        }
     
-    
-@router.get("/")
+@router.get("/", tags=["System"])
 def home():
     return {"message": "Auto-Optimized Embedding Service for Electrical Products"}

@@ -4,12 +4,9 @@ import math
 import psutil
 import torch
 import logging
-from concurrent.futures import ThreadPoolExecutor
-from fastapi import HTTPException, Security
+from fastapi import Security, HTTPException
 from fastapi.security import APIKeyHeader
-from .model_loader import EmbeddingModel
-from .utils.cache_utils import EmbeddingCache
-from .services.embedding_service import EmbeddingService
+from .app_state import app_state
 
 # Cargar archivo .env
 load_dotenv()
@@ -18,62 +15,132 @@ load_dotenv()
 API_KEYS = os.getenv("API_KEYS", "").split(",")
 api_key_header = APIKeyHeader(name="X-API-KEY")
 
+logger = logging.getLogger(__name__)
+
 def validate_api_key(api_key: str = Security(api_key_header)):
+    """Valida la clave API proporcionada en el header"""
+    if not API_KEYS or not API_KEYS[0]:
+        logger.warning("No se han configurado API KEYS, permitiendo todas las solicitudes")
+        return api_key
+        
     if api_key not in API_KEYS:
+        logger.warning(f"Intento de acceso con API key inválida: {api_key}")
         raise HTTPException(status_code=401, detail="Invalid API Key")
     return api_key
 
-# Configuración de componentes globales
-model: EmbeddingModel | None = None
-cache: EmbeddingCache | None = None
-executor: ThreadPoolExecutor | None = None
-
-# Función para ajustar dinámicamente el número de hilos según la memoria disponible
 def calculate_threads():
-    free_memory = psutil.virtual_memory().available
-    # Establecer un número de hilos dependiendo de la memoria disponible
-    max_threads = min(os.cpu_count(), free_memory // (1024 ** 3))  # Aproximadamente 1 hilo por GB de RAM
-    return max(2, max_threads)
+    """Calcula el número óptimo de hilos basado en recursos del sistema"""
+    try:
+        free_memory = psutil.virtual_memory().available
+        # Establecer un número de hilos dependiendo de la memoria disponible
+        max_threads = min(os.cpu_count() or 4, free_memory // (1024 ** 3))  # 1 hilo por GB de RAM
+        return max(2, max_threads)
+    except Exception as e:
+        logger.error(f"Error calculando hilos: {e}", exc_info=True)
+        return 4  # Valor por defecto
 
-# Función para inicializar los componentes (modelo, caché y executor)
-async def init_components():
-    global model, cache, executor
+def init_components():
+    """Inicializa todos los componentes principales del servicio"""
+    try:
+        logger.info("⚙️ Inicializando componentes del servicio...")
+        
+        # Obtener estadísticas del sistema
+        total_ram = psutil.virtual_memory().total
+        cpu_count = os.cpu_count() or 4
+        max_workers = calculate_threads()
+        cache_size = min(20000, math.floor(total_ram / (768 * 4 * 1.5)))
+        
+        # Configurar PyTorch para optimizar rendimiento
+        torch_threads = max(1, min(cpu_count // 2, 4))
+        torch.set_num_threads(torch_threads)
+        
+        # Inicializar modelo
+        from .model_loader import EmbeddingModel
+        model = EmbeddingModel({
+            "num_threads": torch_threads,
+            "quantize": total_ram < 12 * 1024**3
+        })
+        logger.info(f"🧠 Modelo de embeddings inicializado | Hilos: {torch_threads}")
+        
+        # Inicializar caché
+        from .utils.cache_utils import EmbeddingCache
+        cache = EmbeddingCache(max_size=cache_size, ttl=7200)
+        logger.info(f"💾 Caché inicializada | Tamaño: {cache_size} items")
+        
+        # Inicializar executor
+        from concurrent.futures import ThreadPoolExecutor
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        logger.info(f"🧵 ThreadPool creado | Workers: {max_workers}")
+        
+        # Inicializar servicio
+        from .services.embedding_service import EmbeddingService
+        embedding_service = EmbeddingService(
+            model=model,
+            cache=cache,
+            executor=executor
+        )
+        logger.info("✅ Todos los componentes inicializados")
+        
+        # Asignar al app_state
+        app_state.model = model
+        app_state.cache = cache
+        app_state.executor = executor
+        app_state.embedding_service = embedding_service
+        
+    except Exception as e:
+        logger.critical(f"Fallo crítico al inicializar componentes: {str(e)}", exc_info=True)
+        raise RuntimeError(f"No se pudieron inicializar los componentes: {str(e)}")
 
-    total_ram = psutil.virtual_memory().total
-    cpu_count = os.cpu_count() or 1
-    max_workers = max(2, min(cpu_count, 8))
-    cache_size = min(20_000, math.floor(total_ram / (768 * 4 * 1.5)))
+def get_embedding_service():
+    """Obtiene el servicio de embeddings, inicializando si es necesario"""
+    if not app_state.embedding_service:
+        logger.warning("EmbeddingService no inicializado, inicializando ahora")
+        init_components()
+    return app_state.embedding_service
 
-    torch.set_num_threads(max(1, min(cpu_count // 2, 4)))  # Ajuste del número de hilos de PyTorch
+def get_cache():
+    """Obtiene la instancia de la caché"""
+    if not app_state.cache:
+        init_components()
+    return app_state.cache
 
-    torch_config = {
-        "num_threads": torch.get_num_threads(),
-        "quantize": total_ram < 12 * 1024**3
-    }
+def get_model():
+    """Obtiene el modelo de embeddings"""
+    if not app_state.model:
+        init_components()
+    return app_state.model
 
-    logger = logging.getLogger(__name__)
-    logger.info("⚙️ Inicializando modelo y caché...")
+def get_executor():
+    """Obtiene el executor de hilos"""
+    if not app_state.executor:
+        init_components()
+    return app_state.executor
 
-    model = EmbeddingModel(torch_config)
-    cache = EmbeddingCache(max_size=cache_size, ttl=7200)
-    executor = ThreadPoolExecutor(max_workers=max_workers)
-
-    logger.info("✅ Componentes listos")
-
-# Función para obtener el servicio de embeddings
-def get_embedding_service() -> EmbeddingService:
-    if not (model and cache and executor):
-        raise RuntimeError("Service not initialized")
-    return EmbeddingService(model, cache, executor)
-
-# Obtener estado completo de los componentes
-def get_status():
-    return {
-        "model_initialized": model is not None,
-        "cache_initialized": cache is not None,
-        "executor_initialized": executor is not None,
-        "max_workers": executor._max_workers if executor else 0,
-        # USAR LAS NUEVAS FUNCIONES DE LA CACHÉ
-        "cache_size": cache.get_size() if cache else 0,
-        "cache_usage": cache.get_usage() if cache else 0
-    }
+def get_status() -> dict:
+    """Devuelve el estado actual del servicio"""
+    try:
+        cache = get_cache()
+        model = get_model()
+        executor = get_executor()
+        
+        # Obtener estadísticas de la caché
+        cache_stats = cache.get_stats() if cache else {}
+        
+        return {
+            "model_initialized": model is not None and hasattr(model, 'is_loaded') and model.is_loaded(),
+            "max_workers": executor._max_workers if executor else 0,
+            "cache_size": cache_stats.get("max_size", 0),
+            "cache_usage": cache_stats.get("current_size", 0),
+            "cache_hits": cache_stats.get("hits", 0),
+            "cache_misses": cache_stats.get("misses", 0),
+        }
+    except Exception as e:
+        logger.error(f"Error obteniendo estado: {str(e)}")
+        return {
+            "model_initialized": False,
+            "max_workers": 0,
+            "cache_size": 0,
+            "cache_usage": 0,
+            "cache_hits": 0,
+            "cache_misses": 0,
+        }
